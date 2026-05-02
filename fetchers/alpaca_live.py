@@ -1,0 +1,146 @@
+"""Fetch live portfolio data and portfolio history from each strategy's Alpaca paper account."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import pandas as pd
+
+
+@dataclass
+class Position:
+    symbol: str
+    qty: float
+    avg_entry: float
+    current_price: float
+    market_value: float
+    unrealized_pl: float
+    unrealized_pl_pct: float
+
+
+@dataclass
+class PortfolioSnapshot:
+    strategy: str
+    equity: float
+    cash: float
+    buying_power: float
+    today_pl: float
+    today_pl_pct: float
+    positions: list[Position] = field(default_factory=list)
+    error: str | None = None
+
+
+def _fetch_snapshot(name: str, api_key: str, secret_key: str) -> PortfolioSnapshot:
+    if not api_key or not secret_key:
+        return PortfolioSnapshot(
+            strategy=name, equity=0, cash=0, buying_power=0,
+            today_pl=0, today_pl_pct=0, error="API keys not configured",
+        )
+    try:
+        from alpaca.trading.client import TradingClient
+        from alpaca.trading.requests import GetAssetsRequest
+
+        client = TradingClient(api_key, secret_key, paper=True)
+        account = client.get_account()
+
+        equity = float(account.equity)
+        cash = float(account.cash)
+        buying_power = float(account.buying_power)
+        last_equity = float(account.last_equity)
+        today_pl = equity - last_equity
+        today_pl_pct = (today_pl / last_equity * 100) if last_equity else 0
+
+        raw_positions = client.get_all_positions()
+        positions = [
+            Position(
+                symbol=p.symbol,
+                qty=float(p.qty),
+                avg_entry=float(p.avg_entry_price),
+                current_price=float(p.current_price),
+                market_value=float(p.market_value),
+                unrealized_pl=float(p.unrealized_pl),
+                unrealized_pl_pct=float(p.unrealized_plpc) * 100,
+            )
+            for p in raw_positions
+        ]
+
+        return PortfolioSnapshot(
+            strategy=name,
+            equity=equity,
+            cash=cash,
+            buying_power=buying_power,
+            today_pl=today_pl,
+            today_pl_pct=today_pl_pct,
+            positions=positions,
+        )
+
+    except Exception as exc:
+        return PortfolioSnapshot(
+            strategy=name, equity=0, cash=0, buying_power=0,
+            today_pl=0, today_pl_pct=0, error=str(exc),
+        )
+
+
+def fetch_portfolio_history(name: str, api_key: str, secret_key: str, period: str = "all") -> pd.Series:
+    """
+    Returns a pd.Series of daily equity values indexed by UTC date.
+    Zeros and Nones (market-closed / bot-not-running days) are dropped.
+    period: "1M" | "3M" | "6M" | "1A" | "all"
+    """
+    if not api_key or not secret_key:
+        return pd.Series(dtype=float, name=name)
+    try:
+        from alpaca.trading.client import TradingClient
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+        client = TradingClient(api_key, secret_key, paper=True)
+        req = GetPortfolioHistoryRequest(period=period, timeframe="1D")
+        h = client.get_portfolio_history(req)
+
+        ts = pd.to_datetime(h.timestamp, unit="s", utc=True)
+        equity = [e if e else 0.0 for e in h.equity]
+        series = pd.Series(equity, index=ts, name=name, dtype=float)
+        # Drop zero/null bars (days before bot started or market holidays with no data)
+        series = series[series > 0]
+        return series
+    except Exception:
+        return pd.Series(dtype=float, name=name)
+
+
+def fetch_all_history(strategies: list, period: str = "all") -> dict[str, pd.Series]:
+    from config import alpaca_keys
+
+    result = {}
+    for s in strategies:
+        key, secret = alpaca_keys(s.env_prefix)
+        series = fetch_portfolio_history(s.name, key, secret, period)
+        if not series.empty:
+            result[s.name] = series
+    return result
+
+
+def fetch_all_snapshots(strategies: list) -> list[PortfolioSnapshot]:
+    from config import alpaca_keys
+
+    snapshots = []
+    for s in strategies:
+        key, secret = alpaca_keys(s.env_prefix)
+        snapshots.append(_fetch_snapshot(s.name, key, secret))
+    return snapshots
+
+
+def positions_to_df(positions: list[Position]) -> pd.DataFrame:
+    if not positions:
+        return pd.DataFrame(columns=["Symbol", "Qty", "Avg Entry", "Price", "Mkt Value", "Unreal P&L", "P&L %"])
+    return pd.DataFrame([
+        {
+            "Symbol": p.symbol,
+            "Qty": p.qty,
+            "Avg Entry": f"${p.avg_entry:,.2f}",
+            "Price": f"${p.current_price:,.2f}",
+            "Mkt Value": f"${p.market_value:,.2f}",
+            "Unreal P&L": f"${p.unrealized_pl:+,.2f}",
+            "P&L %": f"{p.unrealized_pl_pct:+.2f}%",
+        }
+        for p in sorted(positions, key=lambda x: x.market_value, reverse=True)
+    ])
