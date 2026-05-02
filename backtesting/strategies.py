@@ -15,36 +15,8 @@ import numpy as np
 import pandas as pd
 
 from backtesting.engine import atr, rsi, rolling_sharpe, run_simulation, sma, BacktestResult
-from config import DEFENSIVE, UNIVERSE
-
-
-# ── Shared data loader ───────────────────────────────────────────────────────
-
-def load_ohlcv(start: str, end: str, symbols: list[str] | None = None) -> dict[str, pd.DataFrame]:
-    import yfinance as yf
-
-    syms = symbols or UNIVERSE
-    raw = yf.download(syms, start=start, end=end, auto_adjust=True, progress=False)
-    if raw.empty:
-        return {}
-
-    # yfinance always returns MultiIndex columns when given a list
-    is_multi = isinstance(raw.columns, pd.MultiIndex)
-
-    result = {}
-    for sym in syms:
-        try:
-            if is_multi:
-                df = raw.xs(sym, axis=1, level=1).copy()
-            else:
-                df = raw.copy()
-            df.columns = [c.lower() for c in df.columns]
-            df = df.dropna(subset=["close"])
-            if not df.empty:
-                result[sym] = df
-        except KeyError:
-            continue
-    return result
+from config import DEFENSIVE
+from fetchers.market_data import load_ohlcv
 
 
 # ── RL Trader proxy: Sharpe-weighted momentum portfolio ─────────────────────
@@ -284,8 +256,8 @@ def _claudebot_signal(date: pd.Timestamp, ohlcv: dict[str, pd.DataFrame], state:
     max_new = min(3 - state.get("new_this_week", 0), 10 - len(target))
     new_entries = sorted(scored, key=scored.__getitem__, reverse=True)[:max_new]
 
+    from config import SECTOR_MAP
     for sym in new_entries:
-        from config import SECTOR_MAP
         sector = SECTOR_MAP.get(sym, "Unknown")
         # Skip sectors with 2+ consecutive losses
         if sector_losses.get(sector, 0) >= 2:
