@@ -20,11 +20,22 @@ def highlight_best(s: pd.Series) -> list[str]:
         return [""] * len(s)
 
 
+_ALL_METRICS = ["Total Return", "CAGR", "Sharpe", "Sortino", "Max Drawdown", "Calmar", "Ann. Volatility", "Total Trades", "Win Rate"]
+_DEFAULT_METRICS = ["Total Return", "CAGR", "Sharpe", "Max Drawdown", "Total Trades", "Win Rate"]
+
+
 def metrics_table(
     results: list[BacktestResult],
     min_bars: int = MIN_BARS_FOR_METRICS,
 ) -> None:
     """Render a styled performance metrics table from a list of BacktestResults."""
+    selected_cols = st.multiselect(
+        "Metrics to display",
+        _ALL_METRICS,
+        default=_DEFAULT_METRICS,
+        key="metrics_cols",
+    )
+
     metric_rows, skipped = [], []
     for result in results:
         if len(result.equity_curve) < min_bars:
@@ -40,8 +51,12 @@ def metrics_table(
 
     if metric_rows:
         mdf = pd.DataFrame(metric_rows).set_index("Strategy")
-        st.dataframe(mdf.style.apply(highlight_best, axis=0), use_container_width=True)
-        st.caption("Green highlight = best value per metric column.")
+        cols = [c for c in selected_cols if c in mdf.columns]
+        if cols:
+            st.dataframe(mdf[cols].style.apply(highlight_best, axis=0), use_container_width=True)
+            st.caption("Green highlight = best value per metric column.")
+        else:
+            st.info("Select at least one metric above.")
     elif not skipped:
         st.info("Not enough data yet to compute metrics.")
 
@@ -65,6 +80,31 @@ def monthly_heatmaps_row(curves: dict[str, pd.Series]) -> None:
         if fig:
             with col:
                 st.plotly_chart(fig, use_container_width=True)
+
+
+def download_trade_log(results: list[BacktestResult]) -> None:
+    """Render a CSV download button for the full trade log."""
+    all_trades = []
+    for result in results:
+        for t in result.trade_log:
+            all_trades.append({
+                "Strategy": result.strategy,
+                "Date": t.date.date() if hasattr(t.date, "date") else t.date,
+                "Symbol": t.symbol,
+                "Side": t.side.upper(),
+                "Qty": round(t.qty, 4),
+                "Price": round(t.price, 2),
+                "Value": round(t.value, 2),
+            })
+    if not all_trades:
+        return
+    df = pd.DataFrame(all_trades)
+    st.download_button(
+        label="Download trade log (CSV)",
+        data=df.to_csv(index=False).encode(),
+        file_name="backtest_trade_log.csv",
+        mime="text/csv",
+    )
 
 
 def trade_log_table(results: list[BacktestResult]) -> None:

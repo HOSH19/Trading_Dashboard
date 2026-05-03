@@ -7,7 +7,7 @@ import streamlit as st
 
 from backtesting.strategies import run_claudebot, run_rl_trader, run_regime_trader, run_spy_benchmark
 from ui.charts import drawdown_chart, equity_chart
-from ui.components import metrics_table, monthly_heatmaps_row, trade_log_table
+from ui.components import download_trade_log, metrics_table, monthly_heatmaps_row, trade_log_table
 
 _PROXY_EXPLAINER = """
 | Strategy | Proxy Logic |
@@ -84,7 +84,18 @@ def render() -> None:
         return
 
     results = st.session_state["bt_results"]
-    curves = {r.strategy: r.equity_curve for r in results if not r.equity_curve.empty}
+    all_curves = {r.strategy: r.equity_curve for r in results if not r.equity_curve.empty}
+
+    if all_curves:
+        visible = st.multiselect(
+            "Strategies to display on charts",
+            list(all_curves.keys()),
+            default=list(all_curves.keys()),
+            key="bt_visible_strategies",
+        )
+        curves = {k: v for k, v in all_curves.items() if k in visible}
+    else:
+        curves = {}
 
     if curves:
         st.plotly_chart(equity_chart(curves, "Backtest Equity Curves"), use_container_width=True)
@@ -105,5 +116,6 @@ def render() -> None:
         "Use this to verify the strategy logic is behaving as expected — "
         "not calling any external API, purely rule-based from OHLCV data."
     )
+    download_trade_log(results)
     with st.expander("Show trade log", expanded=False):
         trade_log_table(results)
