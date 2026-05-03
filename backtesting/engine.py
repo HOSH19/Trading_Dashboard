@@ -40,8 +40,11 @@ def run_simulation(
 
         if bar_idx % rebalance_every == 0:
             slice_ohlcv = {s: ohlcv[s].loc[:date] for s in ohlcv if date in ohlcv[s].index}
-            target = signal_fn(date, slice_ohlcv, state)
             portfolio_value = cash + sum(holdings.get(s, 0) * prices.get(s, 0) for s in holdings)
+            state["__equity__"] = portfolio_value
+            state["__holdings__"] = dict(holdings)
+            state["__cash__"] = cash
+            target = signal_fn(date, slice_ohlcv, state)
             cash = _rebalance(date, target, holdings, stop_prices, prices, trades, cash, portfolio_value, commission, state)
 
         equity_curve[date] = cash + sum(holdings.get(s, 0) * prices.get(s, 0) for s in holdings)

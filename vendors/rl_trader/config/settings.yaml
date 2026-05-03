@@ -1,0 +1,75 @@
+data:
+  symbols: [AAPL, MSFT, GOOGL, AMZN, NVDA, META, TSLA, AMD, AVGO, TSM,
+            JPM, GS, V, MA,
+            XOM, CVX,
+            UNH, JNJ,
+            SPY, QQQ]
+  start_date: "2010-01-01"
+  end_date: null  # null = today
+  source: yfinance  # yfinance | alpaca
+  cache_dir: data/cache
+
+environment:
+  episode_len: 252
+  initial_capital: 100_000
+  transaction_cost: 0.001   # 0.1% per unit of turnover
+  slippage: 0.0005          # 0.05% per fill
+  fill_delay: 1             # bars: action at T, fill at T+1 open
+  max_dd_terminate: 0.10    # early episode termination at 10% drawdown (aligned with regime trader)
+  reward_fn: risk_adjusted  # risk_adjusted | sharpe_scaled | log_return
+
+agent:
+  type: a2c                 # ppo | sac
+  total_timesteps_per_fold: 500_000
+  n_steps: 252              # PPO rollout length (one trading year)
+  batch_size: 63
+  n_epochs: 10
+  learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01            # entropy bonus encourages exploration
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  net_arch: [256, 128]      # MLP hidden layers
+  checkpoint_dir: checkpoints
+
+training:
+  train_window: 252         # bars (~1 year)
+  test_window: 126          # bars (~6 months)
+  step_size: 126
+  train_episodes_per_fold: 200
+  val_split: 0.2            # fraction of IS window held out for early stopping
+  early_stop_patience: 10   # eval periods without improvement before stopping
+  feature_noise_sigma: 0.1  # Gaussian noise added to features during training
+  equity_randomization: 0.1 # ±10% random starting equity per episode
+
+reward:
+  lambda_drawdown: 10.0
+  lambda_transaction_cost: 5.0
+  lambda_concentration: 0.1
+  drawdown_penalty_threshold: 0.05  # no penalty until 5% DD
+
+risk:
+  max_single_position: 0.08   # max 8% per symbol — matches regime trader (~12 full positions)
+  min_cash: 0.20              # matches regime trader implicit 20% min cash (1 - max_exposure)
+  max_exposure: 0.80          # matches regime trader
+  max_turnover_per_step: 0.30
+  daily_dd_halt: 0.03         # halt at 3% daily DD — matches regime trader
+  weekly_dd_halt: 0.07        # halt at 7% weekly DD — matches regime trader
+  max_dd_from_peak: 0.10      # halt at 10% from peak — matches regime trader
+
+backtest:
+  risk_free_rate: 0.045     # 4.5% annualized
+  benchmark: SPY
+
+broker:
+  paper_trading: true
+  order_timeout_secs: 30    # seconds before limit → market retry
+
+monitoring:
+  db_path: state.db
+  log_dir: logs
+  log_max_bytes: 10_485_760  # 10 MB
+  log_backup_count: 30
+  dashboard_refresh_secs: 5

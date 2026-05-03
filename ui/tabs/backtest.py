@@ -1,4 +1,4 @@
-"""Backtest Comparison tab — run all 3 strategy proxies on historical OHLCV data."""
+"""Backtest Comparison tab — runs all 3 real agent implementations on historical OHLCV data."""
 
 from __future__ import annotations
 
@@ -9,28 +9,39 @@ from backtesting.strategies import run_claudebot, run_rl_trader, run_regime_trad
 from ui.charts import drawdown_chart, equity_chart
 from ui.components import download_trade_log, metrics_table, monthly_heatmaps_row, trade_log_table
 
-_PROXY_EXPLAINER = """
-| Strategy | Proxy Logic |
+_STRATEGY_EXPLAINER = """
+| Strategy | Implementation |
 |---|---|
-| **RL Trader** | Ranks universe by 60-day rolling Sharpe. Picks top 10 with RSI 35–72. Equal-weight at 8% cap. Monthly rebalance. |
-| **Regime Trader** | SPY 20-day realized vol → Low/Mid/High regime → 90%/70%/50% allocation to momentum or defensive names. ATR trailing stops. Weekly rebalance. |
-| **Claudebot** | Scores each stock 0–10 on: 5-day momentum vs peers, YTD sector rank, distance from 20-SMA, volume vs avg, ATR-based R:R. Enters if ≥7. Max 3 new/week, max 10 positions, 10% trailing stop. |
+| **RL Trader** | A2C neural network (fold_25 checkpoint). Observes 16 market features per symbol + portfolio state. Outputs softmax portfolio weights daily. Same inference path as `scripts/trade.py`. |
+| **Regime Trader** | Pre-trained HMM (Student-t emissions, SPY/QQQ/IWM/DIA features) → regime tier → SignalGenerator. Same pipeline as `run_daily.py`. Rebalances weekly on signal change. |
+| **Claudebot** | Claude Haiku scores all 20 symbols weekly using the 5-factor rubric from TRADING-STRATEGY.md. Alpaca News API provides headlines for the catalyst factor. Responses are cached. |
 """
 
 
-def _run_all(start: str, end: str, include_spy: bool):
-    progress = st.progress(0, text="Downloading market data…")
-    progress.progress(10, "Running RL Trader…")
-    results = [run_rl_trader(start, end)]
+def _run_selected(start: str, end: str, *, run_rl: bool, run_regime: bool, run_claude: bool, include_spy: bool):
+    steps = [s for s in [run_rl, run_regime, run_claude, include_spy] if s]
+    total = len(steps)
+    done = 0
+    results = []
+    progress = st.progress(0, text="Starting…")
 
-    progress.progress(40, "Running Regime Trader…")
-    results.append(run_regime_trader(start, end))
+    if run_rl:
+        progress.progress(int(done / total * 90), "Running RL Trader…")
+        results.append(run_rl_trader(start, end))
+        done += 1
 
-    progress.progress(70, "Running Claudebot…")
-    results.append(run_claudebot(start, end))
+    if run_regime:
+        progress.progress(int(done / total * 90), "Running Regime Trader…")
+        results.append(run_regime_trader(start, end))
+        done += 1
+
+    if run_claude:
+        progress.progress(int(done / total * 90), "Running Claudebot (API)…")
+        results.append(run_claudebot(start, end))
+        done += 1
 
     if include_spy:
-        progress.progress(90, "Running SPY benchmark…")
+        progress.progress(int(done / total * 90), "Running SPY benchmark…")
         results.append(run_spy_benchmark(start, end))
 
     progress.progress(100, "Done!")
@@ -50,30 +61,52 @@ def _trade_summary(results) -> None:
 def render() -> None:
     st.subheader("Historical Strategy Backtest")
     st.markdown(
-        "Run all 3 strategy proxies against the **same** historical period to compare "
-        "relative performance **without waiting months** for live results."
+        "Runs all 3 live agents against the **same** historical period using their **real production code** — "
+        "same inference path as the GitHub Actions workflows."
     )
-    with st.expander("How each proxy works", expanded=False):
-        st.markdown(_PROXY_EXPLAINER)
+    with st.expander("How each agent works", expanded=False):
+        st.markdown(_STRATEGY_EXPLAINER)
 
-    c1, c2, c3 = st.columns([2, 2, 1])
+    c1, c2 = st.columns([2, 2])
     with c1:
         start_date = st.date_input("Start date", value=pd.Timestamp("2022-01-01").date())
     with c2:
         end_date = st.date_input("End date", value=pd.Timestamp("2024-12-31").date())
-    with c3:
-        include_spy = st.checkbox("Include SPY benchmark", value=True)
+
+    st.markdown("**Strategies to run**")
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    with sc1:
+        run_rl = st.checkbox("RL Trader", value=True)
+    with sc2:
+        run_regime = st.checkbox("Regime Trader", value=True)
+    with sc3:
+        run_claude = st.checkbox("Claudebot (API $$)", value=False)
+    with sc4:
+        include_spy = st.checkbox("SPY benchmark", value=True)
+
+    if run_claude:
+        st.info(
+            "Claudebot makes real Claude API calls (~$3–8 per year of data). "
+            "Results are cached after the first run — reruns are free.",
+            icon="💰",
+        )
 
     if st.button("Run Backtest", type="primary", use_container_width=True):
         if start_date >= end_date:
             st.error("End date must be after start date.")
+        elif not any([run_rl, run_regime, run_claude]):
+            st.error("Select at least one strategy to run.")
         else:
-            with st.spinner("Running backtests — this takes 30–90 seconds…"):
+            spinner_msg = "Running backtests…" if not run_claude else "Running backtests — Claudebot may take several minutes on first run…"
+            with st.spinner(spinner_msg):
                 try:
-                    results = _run_all(
+                    results = _run_selected(
                         start_date.strftime("%Y-%m-%d"),
                         end_date.strftime("%Y-%m-%d"),
-                        include_spy,
+                        run_rl=run_rl,
+                        run_regime=run_regime,
+                        run_claude=run_claude,
+                        include_spy=include_spy,
                     )
                     st.session_state["bt_results"] = results
                 except Exception as exc:
@@ -110,12 +143,8 @@ def render() -> None:
     monthly_heatmaps_row(curves)
 
     st.divider()
-    st.subheader("Trade Log Verification")
-    st.caption(
-        "Inspect every simulated entry and exit. "
-        "Use this to verify the strategy logic is behaving as expected — "
-        "not calling any external API, purely rule-based from OHLCV data."
-    )
+    st.subheader("Trade Log")
+    st.caption("Inspect every simulated entry and exit.")
     download_trade_log(results)
     with st.expander("Show trade log", expanded=False):
         trade_log_table(results)
