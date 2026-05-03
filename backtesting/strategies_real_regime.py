@@ -54,6 +54,9 @@ def _init() -> None:
     _hmm.load(str(VENDOR / "hmm_model.pkl"))
 
     orchestrator = StrategyOrchestrator(config.get("strategy", {}), _hmm.regime_infos)
+    # min_train_bars=504 is the training requirement; inference only needs ~280 bars
+    # for the rolling feature windows (252-bar z-scores, SMA200). Patch it down.
+    config.setdefault("hmm", {})["min_train_bars"] = 280
     _signal_gen = SignalGenerator(_hmm, orchestrator, config)
 
 
@@ -82,9 +85,9 @@ def run_regime_trader(start: str, end: str, symbols=None) -> BacktestResult:
     import pandas as pd
     _init()
 
-    # SignalGenerator requires min_train_bars=504 of history before producing signals.
-    # Load 3 years of warmup data so the HMM has enough bars from bar 1 of the backtest.
-    warmup_start = (pd.Timestamp(start) - pd.DateOffset(years=3)).strftime("%Y-%m-%d")
+    # Inference needs ~280 bars for rolling feature windows (252-bar z-scores, SMA200).
+    # Load 15 months of warmup so the HMM has full features from bar 1 of the backtest.
+    warmup_start = (pd.Timestamp(start) - pd.DateOffset(months=15)).strftime("%Y-%m-%d")
 
     hmm_syms = ["IWM", "DIA"]
     all_syms = list({*(symbols or []), *hmm_syms})
