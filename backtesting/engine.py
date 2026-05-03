@@ -84,9 +84,10 @@ class BacktestResult:
         max_dd = drawdown.min()
         calmar = cagr / (abs(max_dd) + 1e-9)
 
-        buys = [t for t in self.trade_log if t.side == "buy"]
-        sells = [t for t in self.trade_log if t.side == "sell"]
         win_rate = self._compute_win_rate()
+        trade_stats = self._compute_trade_stats()
+
+        sells = [t for t in self.trade_log if t.side == "sell"]
 
         return {
             "Total Return": f"{total_return:.1%}",
@@ -98,23 +99,82 @@ class BacktestResult:
             "Ann. Volatility": f"{ann_vol:.1%}",
             "Total Trades": len(sells),
             "Win Rate": f"{win_rate:.1%}" if win_rate is not None else "—",
+            "Profit Factor": f"{trade_stats['profit_factor']:.2f}" if trade_stats["profit_factor"] is not None else "—",
+            "Avg Win %": f"{trade_stats['avg_win']:.1%}" if trade_stats["avg_win"] is not None else "—",
+            "Avg Loss %": f"{trade_stats['avg_loss']:.1%}" if trade_stats["avg_loss"] is not None else "—",
+            "Expectancy $": f"${trade_stats['expectancy']:,.0f}" if trade_stats["expectancy"] is not None else "—",
+            "Best Trade %": f"{trade_stats['best']:.1%}" if trade_stats["best"] is not None else "—",
+            "Worst Trade %": f"{trade_stats['worst']:.1%}" if trade_stats["worst"] is not None else "—",
+            "Avg Hold Days": f"{trade_stats['avg_hold']:.0f}" if trade_stats["avg_hold"] is not None else "—",
+            "Max Consec. Losses": trade_stats["max_consec_losses"] if trade_stats["max_consec_losses"] is not None else "—",
         }
 
-    def _compute_win_rate(self) -> float | None:
-        """Match buy/sell pairs per symbol to compute win rate."""
-        positions: dict[str, list[float]] = {}
-        wins = losses = 0
-        for t in self.trade_log:
+    def _matched_trades(self):
+        """Yield (entry_price, exit_price, entry_date, exit_date, value) for each closed round-trip."""
+        entry_prices: dict[str, list[tuple]] = {}
+        for t in sorted(self.trade_log, key=lambda x: x.date):
             if t.side == "buy":
-                positions.setdefault(t.symbol, []).append(t.price)
-            elif t.side == "sell" and t.symbol in positions and positions[t.symbol]:
-                entry = positions[t.symbol].pop(0)
-                if t.price >= entry:
-                    wins += 1
-                else:
-                    losses += 1
+                entry_prices.setdefault(t.symbol, []).append((t.price, t.date, t.value))
+            elif t.side == "sell" and entry_prices.get(t.symbol):
+                ep, ed, ev = entry_prices[t.symbol].pop(0)
+                yield ep, t.price, ed, t.date, ev
+
+    def _compute_win_rate(self) -> float | None:
+        wins = losses = 0
+        for ep, xp, *_ in self._matched_trades():
+            if xp >= ep:
+                wins += 1
+            else:
+                losses += 1
         total = wins + losses
         return wins / total if total > 0 else None
+
+    def _compute_trade_stats(self) -> dict:
+        win_rets, loss_rets, hold_days, win_vals, loss_vals = [], [], [], [], []
+        results_seq = []  # 1=win, 0=loss for consecutive loss calc
+
+        for ep, xp, ed, xd, ev in self._matched_trades():
+            ret = xp / ep - 1
+            days = (xd - ed).days
+            hold_days.append(days)
+            if ret >= 0:
+                win_rets.append(ret)
+                win_vals.append(ev * ret)
+                results_seq.append(1)
+            else:
+                loss_rets.append(ret)
+                loss_vals.append(ev * abs(ret))
+                results_seq.append(0)
+
+        if not results_seq:
+            return {k: None for k in ("profit_factor", "avg_win", "avg_loss", "expectancy", "best", "worst", "avg_hold", "max_consec_losses")}
+
+        gross_win = sum(win_vals)
+        gross_loss = sum(loss_vals)
+        profit_factor = gross_win / gross_loss if gross_loss > 0 else None
+
+        n = len(results_seq)
+        wr = len(win_rets) / n
+        avg_win = float(np.mean(win_rets)) if win_rets else 0.0
+        avg_loss = float(np.mean(loss_rets)) if loss_rets else 0.0
+        expectancy = (wr * avg_win + (1 - wr) * avg_loss) * self.initial_capital if results_seq else None
+
+        max_consec = cur = 0
+        for r in results_seq:
+            cur = cur + 1 if r == 0 else 0
+            max_consec = max(max_consec, cur)
+
+        all_rets = win_rets + loss_rets
+        return {
+            "profit_factor": profit_factor,
+            "avg_win": avg_win if win_rets else None,
+            "avg_loss": avg_loss if loss_rets else None,
+            "expectancy": expectancy,
+            "best": max(all_rets) if all_rets else None,
+            "worst": min(all_rets) if all_rets else None,
+            "avg_hold": float(np.mean(hold_days)) if hold_days else None,
+            "max_consec_losses": max_consec if results_seq else None,
+        }
 
 
 def run_simulation(

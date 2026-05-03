@@ -20,7 +20,11 @@ def highlight_best(s: pd.Series) -> list[str]:
         return [""] * len(s)
 
 
-_ALL_METRICS = ["Total Return", "CAGR", "Sharpe", "Sortino", "Max Drawdown", "Calmar", "Ann. Volatility", "Total Trades", "Win Rate"]
+_ALL_METRICS = [
+    "Total Return", "CAGR", "Sharpe", "Sortino", "Max Drawdown", "Calmar", "Ann. Volatility",
+    "Total Trades", "Win Rate", "Profit Factor", "Avg Win %", "Avg Loss %",
+    "Expectancy $", "Best Trade %", "Worst Trade %", "Avg Hold Days", "Max Consec. Losses",
+]
 _DEFAULT_METRICS = ["Total Return", "CAGR", "Sharpe", "Max Drawdown", "Total Trades", "Win Rate"]
 
 
