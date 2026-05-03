@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from backtesting.engine import BacktestResult
+from backtesting.metrics import BacktestResult
 
 MIN_BARS_FOR_METRICS = 10  # annualised stats are meaningless on < 2 weeks of data
 

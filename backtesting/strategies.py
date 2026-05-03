@@ -10,7 +10,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from backtesting.engine import BacktestResult, atr, rsi, rolling_sharpe, run_simulation, sma
+from backtesting.engine import run_simulation
+from backtesting.indicators import atr, rsi, rolling_sharpe, sma
+from backtesting.metrics import BacktestResult
 from config import DEFENSIVE, SECTOR_MAP
 from fetchers.market_data import load_ohlcv
 
