@@ -57,23 +57,39 @@ def _init() -> None:
     _signal_gen = SignalGenerator(_hmm, orchestrator, config)
 
 
+_HMM_ONLY = {"IWM", "DIA"}  # loaded for features, not for trading
+
+
 def _regime_signal(date, ohlcv, state):
     _init()
     _ensure_vendor_path()
+    trading_syms = [s for s in ohlcv if s not in _HMM_ONLY]
     try:
         signals, _ = _signal_gen.generate(
-            symbols=list(ohlcv.keys()),
+            symbols=trading_syms,
             bars_by_symbol=ohlcv,
             current_allocations=state.get("weights", {}),
         )
     except Exception:
         return {}
 
-    result = {
-        s.symbol: s.position_size_pct
-        for s in signals
-        if s.direction.upper() == "LONG" and s.position_size_pct > 0.001
-    }
+    # position_size_pct is a per-symbol target (fraction of equity), not a portfolio weight.
+    # The live RiskManager caps each at max_single_position=8% and total at max_exposure=80%.
+    # Apply the same caps here to match what the real system executes.
+    MAX_SINGLE = 0.08
+    MAX_TOTAL = 0.80
+
+    result = {}
+    for s in signals:
+        if s.direction.upper() != "LONG" or s.position_size_pct <= 0.001:
+            continue
+        result[s.symbol] = min(s.position_size_pct * s.leverage, MAX_SINGLE)
+
+    total = sum(result.values())
+    if total > MAX_TOTAL:
+        scale = MAX_TOTAL / total
+        result = {sym: w * scale for sym, w in result.items()}
+
     state["weights"] = result
     return result
 
@@ -87,8 +103,10 @@ def run_regime_trader(start: str, end: str, symbols=None) -> BacktestResult:
     # warmup so the HMM has valid feature rows from bar 1 of the actual backtest window.
     warmup_start = (pd.Timestamp(start) - pd.DateOffset(months=25)).strftime("%Y-%m-%d")
 
+    from config import UNIVERSE
+    # IWM + DIA needed for HMM multi-symbol features; rest is the trading universe
     hmm_syms = ["IWM", "DIA"]
-    all_syms = list({*(symbols or []), *hmm_syms})
+    all_syms = list({*(symbols or UNIVERSE), *hmm_syms})
     ohlcv = load_ohlcv(warmup_start, end, all_syms)
     if not ohlcv:
         return BacktestResult("Regime Trader", pd.Series(dtype=float), [])
