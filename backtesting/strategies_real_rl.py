@@ -46,7 +46,9 @@ def _rl_signal(date, ohlcv, state):
         from env.observation import ObservationBuilder
         from env.portfolio import PortfolioState
 
-    feat_cols = feature_columns(use_macro=False)
+    # Model was trained with macro features (19 per symbol → 425 obs dims).
+    # We don't fetch live macro during backtesting, so zero-fill those 3 columns.
+    feat_cols = feature_columns(use_macro=True)
     n_features = len(feat_cols)
     symbols = _config.get("data", {}).get("symbols", list(ohlcv.keys()))
     symbols = [s for s in symbols if s in ohlcv]
@@ -57,11 +59,11 @@ def _rl_signal(date, ohlcv, state):
         if df is None or len(df) < 252:
             feature_rows[sym] = np.zeros(n_features, dtype=np.float32)
             continue
-        feats = compute_features(df)
+        feats = compute_features(df, macro=None)  # macro cols stay NaN → filled to 0 below
         if feats.empty:
             feature_rows[sym] = np.zeros(n_features, dtype=np.float32)
         else:
-            feature_rows[sym] = feats.iloc[-1][feat_cols].fillna(0).values.astype(np.float32)
+            feature_rows[sym] = feats.iloc[-1].reindex(feat_cols).fillna(0).values.astype(np.float32)
 
     if not feature_rows:
         return {}
