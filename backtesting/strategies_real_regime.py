@@ -72,7 +72,7 @@ def _regime_signal(date, ohlcv, state):
     result = {
         s.symbol: s.position_size_pct
         for s in signals
-        if s.direction == "long" and s.position_size_pct > 0.001
+        if s.direction.upper() == "LONG" and s.position_size_pct > 0.001
     }
     state["weights"] = result
     return result
