@@ -32,13 +32,18 @@ class BacktestResult:
 
         rets = eq.pct_change().dropna()
         total_return = eq.iloc[-1] / eq.iloc[0] - 1
-        n_years = (eq.index[-1] - eq.index[0]).days / 365.25
-        cagr = (1 + total_return) ** (1 / max(n_years, 1e-6)) - 1
+        # Use trading-bar count / 252 to match regime-trader's performance.py
+        n_years = len(eq) / 252
+        cagr = (eq.iloc[-1] / eq.iloc[0]) ** (1 / max(n_years, 1e-6)) - 1
 
-        ann_ret = rets.mean() * 252
+        # Risk-free rate 4.5% annualised, same as regime-trader's _sharpe/_sortino
+        risk_free_rate = 0.045
+        daily_rf = risk_free_rate / 252
+        excess = rets - daily_rf
         ann_vol = rets.std() * np.sqrt(252)
-        sharpe = ann_ret / (ann_vol + 1e-9)
-        sortino = ann_ret / (rets[rets < 0].std() * np.sqrt(252) + 1e-9)
+        sharpe = float(excess.mean() / excess.std() * np.sqrt(252)) if excess.std() > 0 else 0.0
+        downside_std = excess[excess < 0].std()
+        sortino = float(excess.mean() / downside_std * np.sqrt(252)) if downside_std > 0 else 0.0
 
         roll_max = eq.cummax()
         max_dd = ((eq - roll_max) / (roll_max + 1e-9)).min()

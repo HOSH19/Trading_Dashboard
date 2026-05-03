@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from backtesting.strategies import run_claudebot, run_rl_trader, run_regime_trader, run_spy_benchmark
+from backtesting.strategies_real_rl import rl_date_range
 from ui.charts import drawdown_chart, equity_chart
 from ui.components import download_trade_log, metrics_table, monthly_heatmaps_row, trade_log_table
 
@@ -67,11 +68,23 @@ def render() -> None:
     with st.expander("How each agent works", expanded=False):
         st.markdown(_STRATEGY_EXPLAINER)
 
+    rl_min, rl_max = rl_date_range()
+
     c1, c2 = st.columns([2, 2])
     with c1:
-        start_date = st.date_input("Start date", value=pd.Timestamp("2022-01-01").date())
+        start_date = st.date_input(
+            "Start date",
+            value=max(pd.Timestamp("2022-01-01").date(), rl_min.date()),
+            min_value=rl_min.date(),
+            max_value=rl_max.date(),
+        )
     with c2:
-        end_date = st.date_input("End date", value=pd.Timestamp("2024-12-31").date())
+        end_date = st.date_input(
+            "End date",
+            value=min(pd.Timestamp("2024-12-31").date(), rl_max.date()),
+            min_value=rl_min.date(),
+            max_value=rl_max.date(),
+        )
 
     st.markdown("**Strategies to run**")
     sc1, sc2, sc3, sc4 = st.columns(4)

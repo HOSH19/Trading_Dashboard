@@ -1,4 +1,9 @@
-"""RL Trader — real A2C inference, mirroring scripts/trade.py."""
+"""RL Trader — per-fold inference using pre-trained walk-forward checkpoints.
+
+For each fold produced by build_folds() we load fold_N/best_model.zip and run
+OOS inference on that fold's test window only, then stitch the equity curves.
+No training happens here — the checkpoints must already exist.
+"""
 
 from __future__ import annotations
 
@@ -7,14 +12,18 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import yaml
 
 VENDOR = Path(__file__).parents[1] / "vendors" / "rl_trader"
 REGIME_VENDOR = Path(__file__).parents[1] / "vendors" / "regime_trader"
 
+# Pre-trained fold checkpoints — vendored inside the dashboard repo.
+# Override via RL_CHECKPOINT_DIR env var if needed.
+_DEFAULT_CHECKPOINT_DIR = VENDOR / "checkpoints" / "a2c_20sym"
+
 
 def _ensure_vendor_path() -> None:
-    """Put rl_trader vendor first and evict any cached 'data' package from regime_trader."""
     rl_str = str(VENDOR)
     regime_str = str(REGIME_VENDOR)
     for p in (rl_str, regime_str):
@@ -22,125 +31,179 @@ def _ensure_vendor_path() -> None:
             sys.path.remove(p)
     sys.path.insert(0, regime_str)
     sys.path.insert(0, rl_str)
-    # Purge cached 'data' and 'core' packages so Python re-resolves from updated sys.path
     for key in list(sys.modules.keys()):
         if key == "data" or key.startswith("data."):
             del sys.modules[key]
 
-from backtesting.engine import run_simulation
+
 from backtesting.metrics import BacktestResult
 from fetchers.market_data import load_ohlcv
 
-_agent = None
-_config = None
+_date_range_cache: tuple[pd.Timestamp, pd.Timestamp] | None = None
 
 
-def _init() -> None:
-    global _agent, _config
-    if _agent is not None:
-        return
+def rl_date_range() -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Return (min_date, max_date) covered by the vendored fold checkpoints.
+
+    Rebuilds fold boundaries using the same config as training, loading only
+    one symbol to keep it fast.  Result is cached for the session lifetime.
+    """
+    global _date_range_cache
+    if _date_range_cache is not None:
+        return _date_range_cache
+
+    _ensure_vendor_path()
+
+    import os
+
+    with open(VENDOR / "config" / "settings.yaml") as f:
+        config = yaml.safe_load(f)
+
+    checkpoint_dir = Path(os.environ.get("RL_CHECKPOINT_DIR", str(_DEFAULT_CHECKPOINT_DIR)))
+    available_folds = sorted(
+        int(p.name.split("_")[1])
+        for p in checkpoint_dir.iterdir()
+        if p.is_dir() and p.name.startswith("fold_") and (p / "best_model.zip").exists()
+    )
+    if not available_folds:
+        raise RuntimeError(f"No fold checkpoints found in {checkpoint_dir}")
+
+    train_cfg = config.get("training", {})
+    train_window = train_cfg.get("train_window", 252)
+    test_window = train_cfg.get("test_window", 126)
+    step_size = train_cfg.get("step_size", 126)
+
+    # Load one symbol's history — enough to cover all folds
+    symbols = config.get("data", {}).get("symbols", ["SPY"])
+    anchor = symbols[0]
+    total_bars_needed = train_window + (max(available_folds) + 1) * step_size + test_window + 252
+    warmup_months = int(total_bars_needed / 21) + 3
+    earliest = (pd.Timestamp.today() - pd.DateOffset(months=warmup_months)).strftime("%Y-%m-%d")
+    ohlcv = load_ohlcv(earliest, None, [anchor])
+    if not ohlcv:
+        raise RuntimeError("Could not fetch data to determine RL date range")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from data.dataset import build_folds
+
+    folds = build_folds(ohlcv, train_window=train_window, test_window=test_window, step_size=step_size)
+    covered = [f for f in folds if f.fold_idx in available_folds]
+    if not covered:
+        raise RuntimeError("Fold date reconstruction returned no matching folds")
+
+    result = (covered[0].test_start, covered[-1].test_end)
+    _date_range_cache = result
+    return result
+
+
+def _simulate_oos(agent, fold, config: dict, start_equity: float):
+    """Run one OOS fold with a loaded agent (no gradient updates)."""
+    _ensure_vendor_path()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from env.trading_env import TradingEnv
+
+    cfg = dict(config)
+    env_cfg = dict(cfg.get("environment", {}))
+    env_cfg["initial_capital"] = start_equity
+    cfg["environment"] = env_cfg
+
+    env = TradingEnv(fold.test_bars, cfg, macro=None, noise_sigma=0.0, equity_jitter=0.0)
+    obs, _ = env.reset(seed=42)
+
+    equity_by_date: dict[pd.Timestamp, float] = {}
+    common_dates = list(env._common_index)
+    done = False
+
+    while not done:
+        action = agent.predict(obs, deterministic=True)
+        obs, _reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+        step = env._step_idx
+        if step > 0 and step - 1 < len(common_dates):
+            date = common_dates[env._start_idx + step - 1]
+            equity_by_date[date] = info["equity"]
+
+    return pd.Series(equity_by_date).sort_index()
+
+
+def run_rl_trader(start: str, end: str, symbols=None) -> BacktestResult:
+    import os
 
     _ensure_vendor_path()
 
     with open(VENDOR / "config" / "settings.yaml") as f:
-        _config = yaml.safe_load(f)
+        config = yaml.safe_load(f)
+
+    checkpoint_dir = Path(os.environ.get("RL_CHECKPOINT_DIR", str(_DEFAULT_CHECKPOINT_DIR)))
+    if not checkpoint_dir.exists():
+        raise FileNotFoundError(
+            f"RL checkpoint directory not found: {checkpoint_dir}\n"
+            "Set RL_CHECKPOINT_DIR env var to the folder containing fold_0/, fold_1/, …"
+        )
+
+    rl_symbols = symbols or config.get("data", {}).get("symbols")
+    train_cfg = config.get("training", {})
+    train_window = train_cfg.get("train_window", 252)
+    warmup_months = max(24, int((train_window + 252) / 21) + 2)
+    warmup_start = (pd.Timestamp(start) - pd.DateOffset(months=warmup_months)).strftime("%Y-%m-%d")
+
+    ohlcv = load_ohlcv(warmup_start, end, rl_symbols)
+    if not ohlcv:
+        return BacktestResult("RL Trader", pd.Series(dtype=float), [])
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         from agents.a2c_agent import A2CAgent
+        from data.dataset import build_folds
 
-    a = A2CAgent(_config)
-    a.load(str(VENDOR / "checkpoints" / "best_model.zip"))
-    _agent = a
-
-
-def _rl_signal(date, ohlcv, state):
-    _init()
-    _ensure_vendor_path()
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        from data.features import compute_features, feature_columns
-        from env.observation import ObservationBuilder
-        from env.portfolio import PortfolioState
-
-    # Model was trained with macro features (19 per symbol → 425 obs dims).
-    # We don't fetch live macro during backtesting, so zero-fill those 3 columns.
-    feat_cols = feature_columns(use_macro=True)
-    n_features = len(feat_cols)
-    symbols = _config.get("data", {}).get("symbols", list(ohlcv.keys()))
-    symbols = [s for s in symbols if s in ohlcv]
-
-    feature_rows: dict[str, np.ndarray] = {}
-    for sym in symbols:
-        df = ohlcv.get(sym)
-        if df is None or len(df) < 252:
-            feature_rows[sym] = np.zeros(n_features, dtype=np.float32)
-            continue
-        feats = compute_features(df, macro=None)  # macro cols stay NaN → filled to 0 below
-        if feats.empty:
-            feature_rows[sym] = np.zeros(n_features, dtype=np.float32)
-        else:
-            feature_rows[sym] = feats.iloc[-1].reindex(feat_cols).fillna(0).values.astype(np.float32)
-
-    if not feature_rows:
-        return {}
-
-    equity = state.get("__equity__", 100_000.0)
-    holdings = state.get("__holdings__", {})
-    cash = state.get("__cash__", equity)
-    peak = state.get("rl_peak", equity)
-    peak = max(peak, equity)
-    state["rl_peak"] = peak
-    drawdown = (equity - peak) / peak if peak > 0 else 0.0
-
-    prices = {s: ohlcv[s]["close"].iloc[-1] for s in symbols if s in ohlcv}
-    current_weights = {
-        s: holdings.get(s, 0) * prices.get(s, 0) / equity if equity > 0 else 0.0
-        for s in symbols
-    }
-    unrealized_pnl = {s: 0.0 for s in symbols}
-
-    pstate = PortfolioState(
-        equity=equity,
-        cash_fraction=cash / equity if equity > 0 else 1.0,
-        weights=current_weights,
-        unrealized_pnl_pct=unrealized_pnl,
-        drawdown_from_peak=drawdown,
-        days_since_rebalance=state.get("rl_days", 0),
-        step=state.get("rl_step", 0),
+    folds = build_folds(
+        ohlcv,
+        train_window=train_window,
+        test_window=train_cfg.get("test_window", 126),
+        step_size=train_cfg.get("step_size", 126),
     )
-    state["rl_step"] = state.get("rl_step", 0) + 1
-    state["rl_days"] = state.get("rl_days", 0) + 1
+    if not folds:
+        return BacktestResult("RL Trader", pd.Series(dtype=float), [])
 
-    obs_builder = ObservationBuilder(symbols, n_features)
-    episode_len = _config.get("environment", {}).get("episode_len", 252)
-    obs = obs_builder.build(feature_rows=feature_rows, portfolio=pstate, episode_len=episode_len)
+    initial_capital = config.get("environment", {}).get("initial_capital", 100_000.0)
+    all_equity: dict[pd.Timestamp, float] = {}
+    carry_equity = initial_capital
 
-    raw_action = _agent.predict(obs, deterministic=True)
-    # raw_action may be a tuple (action, state) from SB3
-    if isinstance(raw_action, tuple):
-        raw_action = raw_action[0]
+    start_ts = pd.Timestamp(start)
 
-    risk_cfg = _config.get("risk", {})
-    max_pos = risk_cfg.get("max_single_position", 0.08)
-    min_cash = risk_cfg.get("min_cash", 0.20)
+    for fold in folds:
+        # Skip folds whose OOS window ends before the requested start
+        if fold.test_end < start_ts:
+            continue
 
-    equity_weights = np.clip(raw_action[:-1], 0.0, max_pos)
-    if equity_weights.sum() > 1.0 - min_cash:
-        equity_weights = equity_weights * (1.0 - min_cash) / equity_weights.sum()
+        fold_ckpt = checkpoint_dir / f"fold_{fold.fold_idx}" / "best_model.zip"
+        if not fold_ckpt.exists():
+            print(f"[RL Trader] missing checkpoint {fold_ckpt}, skipping fold {fold.fold_idx}")
+            continue
 
-    return {
-        symbols[i]: float(equity_weights[i])
-        for i in range(len(symbols))
-        if equity_weights[i] > 0.001
-    }
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            agent = A2CAgent(config)
+            agent.load(str(fold_ckpt))
 
+        oos_eq = _simulate_oos(agent, fold, config, carry_equity)
 
-def run_rl_trader(start: str, end: str, symbols=None) -> BacktestResult:
-    _init()
-    rl_symbols = _config.get("data", {}).get("symbols") if _config else symbols
-    ohlcv = load_ohlcv(start, end, rl_symbols or symbols)
-    if not ohlcv:
-        return BacktestResult("RL Trader", __import__("pandas").Series(dtype=float), [])
-    return run_simulation(ohlcv, _rl_signal, "RL Trader", rebalance_every=1)
+        if not oos_eq.empty:
+            carry_equity = float(oos_eq.iloc[-1])
+            for date, val in oos_eq.items():
+                all_equity[date] = val
+
+    if not all_equity:
+        return BacktestResult("RL Trader", pd.Series(dtype=float), [])
+
+    eq = pd.Series(all_equity).sort_index()
+    if eq.index.tz is not None:
+        start_ts = start_ts.tz_localize(eq.index.tz)
+    eq_trimmed = eq[eq.index >= start_ts]
+    if eq_trimmed.empty:
+        return BacktestResult("RL Trader", pd.Series(dtype=float), [])
+
+    scale = 100_000.0 / eq_trimmed.iloc[0]
+    return BacktestResult("RL Trader", eq_trimmed * scale, [])
