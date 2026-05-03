@@ -27,13 +27,14 @@ _DEFAULT_METRICS = ["Total Return", "CAGR", "Sharpe", "Max Drawdown", "Total Tra
 def metrics_table(
     results: list[BacktestResult],
     min_bars: int = MIN_BARS_FOR_METRICS,
+    key: str = "metrics_cols",
 ) -> None:
     """Render a styled performance metrics table from a list of BacktestResults."""
     selected_cols = st.multiselect(
         "Metrics to display",
         _ALL_METRICS,
         default=_DEFAULT_METRICS,
-        key="metrics_cols",
+        key=key,
     )
 
     metric_rows, skipped = [], []
@@ -67,7 +68,7 @@ def metrics_table_from_curves(
 ) -> None:
     """Wrapper for callers that only have equity curves (no trade log)."""
     results = [BacktestResult(strategy=name, equity_curve=s, trade_log=[]) for name, s in curves.items()]
-    metrics_table(results, min_bars=min_bars)
+    metrics_table(results, min_bars=min_bars, key="metrics_cols_hist")
 
 
 def monthly_heatmaps_row(curves: dict[str, pd.Series]) -> None:
