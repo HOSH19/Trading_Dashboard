@@ -10,7 +10,18 @@ import numpy as np
 import yaml
 
 VENDOR = Path(__file__).parents[1] / "vendors" / "rl_trader"
-sys.path.insert(0, str(VENDOR))
+REGIME_VENDOR = Path(__file__).parents[1] / "vendors" / "regime_trader"
+
+
+def _ensure_vendor_path() -> None:
+    """Keep rl_trader vendor at the front so its `data` package wins over regime_trader's."""
+    rl_str = str(VENDOR)
+    regime_str = str(REGIME_VENDOR)
+    for p in (rl_str, regime_str):
+        while p in sys.path:
+            sys.path.remove(p)
+    sys.path.insert(0, regime_str)
+    sys.path.insert(0, rl_str)
 
 from backtesting.engine import run_simulation
 from backtesting.metrics import BacktestResult
@@ -24,6 +35,8 @@ def _init() -> None:
     global _agent, _config
     if _agent is not None:
         return
+
+    _ensure_vendor_path()
 
     with open(VENDOR / "config" / "settings.yaml") as f:
         _config = yaml.safe_load(f)
@@ -39,6 +52,7 @@ def _init() -> None:
 
 def _rl_signal(date, ohlcv, state):
     _init()
+    _ensure_vendor_path()
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
