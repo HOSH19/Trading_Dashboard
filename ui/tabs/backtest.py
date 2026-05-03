@@ -7,7 +7,7 @@ import streamlit as st
 
 from backtesting.strategies import run_claudebot, run_rl_trader, run_regime_trader, run_spy_benchmark
 from ui.charts import drawdown_chart, equity_chart
-from ui.components import metrics_table, monthly_heatmaps_row
+from ui.components import metrics_table, monthly_heatmaps_row, trade_log_table
 
 _PROXY_EXPLAINER = """
 | Strategy | Proxy Logic |
@@ -91,9 +91,19 @@ def render() -> None:
         st.plotly_chart(drawdown_chart(curves), use_container_width=True)
 
     st.subheader("Performance Metrics")
-    metrics_table(curves, min_bars=2)
+    metrics_table(results, min_bars=2)
 
     _trade_summary(results)
 
     st.subheader("Monthly Returns")
     monthly_heatmaps_row(curves)
+
+    st.divider()
+    st.subheader("Trade Log Verification")
+    st.caption(
+        "Inspect every simulated entry and exit. "
+        "Use this to verify the strategy logic is behaving as expected — "
+        "not calling any external API, purely rule-based from OHLCV data."
+    )
+    with st.expander("Show trade log", expanded=False):
+        trade_log_table(results)

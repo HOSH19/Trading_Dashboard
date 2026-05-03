@@ -8,7 +8,7 @@ import streamlit as st
 from config import STRATEGIES
 from fetchers.alpaca_live import fetch_all_history
 from ui.charts import drawdown_chart, equity_chart
-from ui.components import metrics_table, monthly_heatmaps_row
+from ui.components import metrics_table_from_curves, monthly_heatmaps_row
 
 _PERIOD_MAP = {"1 Month": "1M", "3 Months": "3M", "6 Months": "6M", "1 Year": "1A", "All time": "all"}
 
@@ -45,7 +45,7 @@ def render() -> None:
     st.plotly_chart(drawdown_chart(curves), use_container_width=True)
 
     st.subheader("Performance Metrics")
-    metrics_table(curves)
+    metrics_table_from_curves(curves)
 
     st.subheader("Monthly Returns")
     monthly_heatmaps_row(curves)
