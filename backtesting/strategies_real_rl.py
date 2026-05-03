@@ -14,7 +14,7 @@ REGIME_VENDOR = Path(__file__).parents[1] / "vendors" / "regime_trader"
 
 
 def _ensure_vendor_path() -> None:
-    """Keep rl_trader vendor at the front so its `data` package wins over regime_trader's."""
+    """Put rl_trader vendor first and evict any cached 'data' package from regime_trader."""
     rl_str = str(VENDOR)
     regime_str = str(REGIME_VENDOR)
     for p in (rl_str, regime_str):
@@ -22,6 +22,10 @@ def _ensure_vendor_path() -> None:
             sys.path.remove(p)
     sys.path.insert(0, regime_str)
     sys.path.insert(0, rl_str)
+    # Purge cached 'data' and 'core' packages so Python re-resolves from updated sys.path
+    for key in list(sys.modules.keys()):
+        if key == "data" or key.startswith("data."):
+            del sys.modules[key]
 
 from backtesting.engine import run_simulation
 from backtesting.metrics import BacktestResult
