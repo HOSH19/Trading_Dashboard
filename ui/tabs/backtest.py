@@ -12,8 +12,8 @@ from ui.components import download_trade_log, metrics_table, monthly_heatmaps_ro
 _STRATEGY_EXPLAINER = """
 | Strategy | Implementation |
 |---|---|
-| **RL Trader** | A2C neural network (fold_25 checkpoint). Observes 16 market features per symbol + portfolio state. Outputs softmax portfolio weights daily. Same inference path as `scripts/trade.py`. |
-| **Regime Trader** | Pre-trained HMM (Student-t emissions, SPY/QQQ/IWM/DIA features) → regime tier → SignalGenerator. Same pipeline as `run_daily.py`. Rebalances weekly on signal change. |
+| **RL Trader** | A2C neural network. Observes 16 market features per symbol + portfolio state. Outputs softmax portfolio weights daily. |
+| **Regime Trader** | Pre-trained HMM (Student-t emissions, SPY/QQQ/IWM/DIA features). Rebalances weekly on signal change. |
 | **Claudebot** | Claude Haiku scores all 20 symbols weekly using the 5-factor rubric from TRADING-STRATEGY.md. Alpaca News API provides headlines for the catalyst factor. Responses are cached. |
 """
 
