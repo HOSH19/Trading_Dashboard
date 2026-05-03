@@ -45,14 +45,13 @@ _date_range_cache: tuple[pd.Timestamp, pd.Timestamp] | None = None
 def rl_date_range() -> tuple[pd.Timestamp, pd.Timestamp]:
     """Return (min_date, max_date) covered by the vendored fold checkpoints.
 
-    Rebuilds fold boundaries using the same config as training, loading only
-    one symbol to keep it fast.  Result is cached for the session lifetime.
+    Computes fold boundaries with the same arithmetic as build_folds(), but
+    without importing from the vendor — avoiding sys.path/sys.modules conflicts.
+    Result is cached for the session lifetime.
     """
     global _date_range_cache
     if _date_range_cache is not None:
         return _date_range_cache
-
-    _ensure_vendor_path()
 
     import os
 
@@ -73,7 +72,7 @@ def rl_date_range() -> tuple[pd.Timestamp, pd.Timestamp]:
     test_window = train_cfg.get("test_window", 126)
     step_size = train_cfg.get("step_size", 126)
 
-    # Load one symbol's history — enough to cover all folds
+    # Load one symbol's trading-day index to reconstruct fold boundaries
     symbols = config.get("data", {}).get("symbols", ["SPY"])
     anchor = symbols[0]
     total_bars_needed = train_window + (max(available_folds) + 1) * step_size + test_window + 252
@@ -83,16 +82,26 @@ def rl_date_range() -> tuple[pd.Timestamp, pd.Timestamp]:
     if not ohlcv:
         raise RuntimeError("Could not fetch data to determine RL date range")
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        from data.dataset import build_folds
+    common_index = ohlcv[anchor].index.sort_values()
+    total = len(common_index)
 
-    folds = build_folds(ohlcv, train_window=train_window, test_window=test_window, step_size=step_size)
-    covered = [f for f in folds if f.fold_idx in available_folds]
-    if not covered:
+    # Replicate build_folds() boundary arithmetic — no vendor import needed
+    test_starts, test_ends = [], []
+    fold_idx = 0
+    start = 0
+    while start + train_window + test_window <= total:
+        train_end_pos = start + train_window
+        test_end_pos = min(train_end_pos + test_window, total)
+        if fold_idx in available_folds:
+            test_starts.append(common_index[train_end_pos])
+            test_ends.append(common_index[test_end_pos - 1])
+        fold_idx += 1
+        start += step_size
+
+    if not test_starts:
         raise RuntimeError("Fold date reconstruction returned no matching folds")
 
-    result = (covered[0].test_start, covered[-1].test_end)
+    result = (test_starts[0], test_ends[-1])
     _date_range_cache = result
     return result
 
