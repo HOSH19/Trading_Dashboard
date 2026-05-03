@@ -79,11 +79,35 @@ def _regime_signal(date, ohlcv, state):
 
 
 def run_regime_trader(start: str, end: str, symbols=None) -> BacktestResult:
+    import pandas as pd
     _init()
-    # HMM requires SPY/QQQ/IWM/DIA for multi-symbol feature extraction
+
+    # SignalGenerator requires min_train_bars=504 of history before producing signals.
+    # Load 3 years of warmup data so the HMM has enough bars from bar 1 of the backtest.
+    warmup_start = (pd.Timestamp(start) - pd.DateOffset(years=3)).strftime("%Y-%m-%d")
+
     hmm_syms = ["IWM", "DIA"]
-    extra = [s for s in hmm_syms if s not in (symbols or [])]
-    ohlcv = load_ohlcv(start, end, (symbols or []) + extra)
+    all_syms = list({*(symbols or []), *hmm_syms})
+    ohlcv = load_ohlcv(warmup_start, end, all_syms)
     if not ohlcv:
-        return BacktestResult("Regime Trader", __import__("pandas").Series(dtype=float), [])
-    return run_simulation(ohlcv, _regime_signal, "Regime Trader", rebalance_every=5)
+        return BacktestResult("Regime Trader", pd.Series(dtype=float), [])
+
+    result = run_simulation(ohlcv, _regime_signal, "Regime Trader", rebalance_every=5)
+
+    # Trim equity curve to the requested window and renormalize to $100k at start
+    eq = result.equity_curve
+    # Align timezone for comparison
+    start_ts = pd.Timestamp(start)
+    if eq.index.tz is not None:
+        start_ts = start_ts.tz_localize(eq.index.tz)
+    eq_trimmed = eq[eq.index >= start_ts]
+    if eq_trimmed.empty:
+        return BacktestResult("Regime Trader", pd.Series(dtype=float), [])
+
+    scale = 100_000.0 / eq_trimmed.iloc[0]
+    trades_trimmed = [t for t in result.trade_log if t.date >= start_ts]
+    return BacktestResult(
+        strategy="Regime Trader",
+        equity_curve=eq_trimmed * scale,
+        trade_log=trades_trimmed,
+    )
