@@ -10,11 +10,14 @@ from backtesting.engine import BacktestResult
 MIN_BARS_FOR_METRICS = 10  # annualised stats are meaningless on < 2 weeks of data
 
 
-_MIN_IS_BEST = {"Max Drawdown", "Avg Loss %", "Worst Trade %", "Max Consec. Losses", "Avg Hold Days"}
+_MIN_IS_BEST = {"Max Consec. Losses"}
+_NO_HIGHLIGHT = {"Avg Hold Days"}
 
 
 def highlight_best(s: pd.Series) -> list[str]:
     """Pandas Styler column — green background on the best value."""
+    if s.name in _NO_HIGHLIGHT:
+        return [""] * len(s)
     try:
         cleaned = (
             s.astype(str)
