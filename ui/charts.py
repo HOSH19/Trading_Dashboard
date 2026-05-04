@@ -21,15 +21,26 @@ _HEATMAP_MONTH_ORDER = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
+_ETF_COLORS = ["#aaaaaa", "#cccccc", "#888888", "#bbbbbb", "#999999", "#dddddd", "#777777"]
+
+
 def equity_chart(curves: dict[str, pd.Series], title: str = "") -> go.Figure:
     fig = go.Figure()
+    etf_color_idx = 0
     for name, series in curves.items():
         if series.empty:
             continue
+        is_etf = name not in _STRATEGY_COLORS
+        if is_etf:
+            color = _ETF_COLORS[etf_color_idx % len(_ETF_COLORS)]
+            etf_color_idx += 1
+            line = dict(color=color, width=1.5, dash="dash")
+        else:
+            line = dict(color=_STRATEGY_COLORS[name], width=2)
         fig.add_trace(go.Scatter(
             x=series.index, y=series.values,
             name=name,
-            line=dict(color=_STRATEGY_COLORS.get(name, "#aaa"), width=2),
+            line=line,
             hovertemplate="%{x|%Y-%m-%d}<br>$%{y:,.0f}<extra>" + name + "</extra>",
         ))
     fig.update_layout(title=title, height=380, yaxis_title="Portfolio Value ($)", **_CHART_LAYOUT)
@@ -38,15 +49,25 @@ def equity_chart(curves: dict[str, pd.Series], title: str = "") -> go.Figure:
 
 def drawdown_chart(curves: dict[str, pd.Series]) -> go.Figure:
     fig = go.Figure()
+    etf_color_idx = 0
     for name, series in curves.items():
         if series.empty:
             continue
         roll_max = series.cummax()
         dd = (series - roll_max) / (roll_max + 1e-9) * 100
+        is_etf = name not in _STRATEGY_COLORS
+        if is_etf:
+            color = _ETF_COLORS[etf_color_idx % len(_ETF_COLORS)]
+            etf_color_idx += 1
+            line = dict(color=color, width=1, dash="dash")
+            fill = None
+        else:
+            line = dict(color=_STRATEGY_COLORS[name], width=1.5)
+            fill = "tozeroy"
         fig.add_trace(go.Scatter(
             x=dd.index, y=dd.values,
-            name=name, fill="tozeroy",
-            line=dict(color=_STRATEGY_COLORS.get(name, "#aaa"), width=1.5),
+            name=name, fill=fill,
+            line=line,
             hovertemplate="%{x|%Y-%m-%d}<br>%{y:.2f}%<extra>" + name + "</extra>",
         ))
     fig.update_layout(title="Drawdown (%)", height=220, yaxis_title="Drawdown (%)", **_CHART_LAYOUT)

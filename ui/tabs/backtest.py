@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from backtesting.strategies import run_claudebot, run_rl_trader, run_regime_trader, run_spy_benchmark
+from backtesting.strategies import run_claudebot, run_rl_trader, run_regime_trader, run_spy_benchmark, run_etf_benchmark, _ETF_OPTIONS
 from backtesting.strategies_real_rl import rl_date_range
 from ui.charts import drawdown_chart, equity_chart
 from ui.components import download_trade_log, metrics_table, monthly_heatmaps_row, trade_log_table
@@ -19,31 +19,30 @@ _STRATEGY_EXPLAINER = """
 """
 
 
-def _run_selected(start: str, end: str, *, run_rl: bool, run_regime: bool, run_claude: bool, include_spy: bool):
-    steps = [s for s in [run_rl, run_regime, run_claude, include_spy] if s]
-    total = len(steps)
+def _run_selected(start: str, end: str, *, run_rl: bool, run_regime: bool, run_claude: bool, etf_benchmarks: list[str]):
+    steps = sum([run_rl, run_regime, run_claude, bool(etf_benchmarks)])
     done = 0
     results = []
     progress = st.progress(0, text="Starting…")
 
     if run_rl:
-        progress.progress(int(done / total * 90), "Running RL Trader…")
+        progress.progress(int(done / steps * 90), "Running RL Trader…")
         results.append(run_rl_trader(start, end))
         done += 1
 
     if run_regime:
-        progress.progress(int(done / total * 90), "Running Regime Trader…")
+        progress.progress(int(done / steps * 90), "Running Regime Trader…")
         results.append(run_regime_trader(start, end))
         done += 1
 
     if run_claude:
-        progress.progress(int(done / total * 90), "Running Claudebot (API)…")
+        progress.progress(int(done / steps * 90), "Running Claudebot (API)…")
         results.append(run_claudebot(start, end))
         done += 1
 
-    if include_spy:
-        progress.progress(int(done / total * 90), "Running SPY benchmark…")
-        results.append(run_spy_benchmark(start, end))
+    for ticker in etf_benchmarks:
+        progress.progress(int(done / steps * 90), f"Loading {ticker}…")
+        results.append(run_etf_benchmark(ticker, start, end))
 
     progress.progress(100, "Done!")
     return results
@@ -87,15 +86,20 @@ def render() -> None:
         )
 
     st.markdown("**Strategies to run**")
-    sc1, sc2, sc3, sc4 = st.columns(4)
+    sc1, sc2, sc3 = st.columns(3)
     with sc1:
         run_rl = st.checkbox("RL Trader", value=True)
     with sc2:
         run_regime = st.checkbox("Regime Trader", value=True)
     with sc3:
         run_claude = st.checkbox("Claudebot (API $$)", value=False)
-    with sc4:
-        include_spy = st.checkbox("SPY benchmark", value=True)
+
+    etf_benchmarks = st.multiselect(
+        "ETF benchmarks",
+        _ETF_OPTIONS,
+        default=["SPY"],
+        help="Buy-and-hold equity curves added to the chart for comparison",
+    )
 
     if run_claude:
         st.info(
@@ -107,8 +111,8 @@ def render() -> None:
     if st.button("Run Backtest", type="primary", use_container_width=True):
         if start_date >= end_date:
             st.error("End date must be after start date.")
-        elif not any([run_rl, run_regime, run_claude]):
-            st.error("Select at least one strategy to run.")
+        elif not any([run_rl, run_regime, run_claude, etf_benchmarks]):
+            st.error("Select at least one strategy or ETF benchmark to run.")
         else:
             spinner_msg = "Running backtests…" if not run_claude else "Running backtests — Claudebot may take several minutes on first run…"
             with st.spinner(spinner_msg):
@@ -119,7 +123,7 @@ def render() -> None:
                         run_rl=run_rl,
                         run_regime=run_regime,
                         run_claude=run_claude,
-                        include_spy=include_spy,
+                        etf_benchmarks=etf_benchmarks,
                     )
                     st.session_state["bt_results"] = results
                 except Exception as exc:
