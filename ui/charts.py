@@ -21,7 +21,24 @@ _HEATMAP_MONTH_ORDER = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-_ETF_COLORS = ["#aaaaaa", "#cccccc", "#888888", "#bbbbbb", "#999999", "#dddddd", "#777777"]
+_ETF_COLORS = {
+    "SPY": "#aaaaaa",
+    "QQQ": "#e377c2",   # pink/magenta
+    "IWM": "#17becf",   # cyan
+    "DIA": "#bcbd22",   # yellow-green
+    "GLD": "#ffd700",   # gold
+    "TLT": "#9467bd",   # purple
+    "BTC-USD": "#f5a623",  # orange
+    "_default": ["#cccccc", "#888888", "#bbbbbb", "#999999"],
+}
+
+
+def _etf_color(name: str, idx: int) -> str:
+    ticker = name.replace(" B&H", "")
+    if ticker in _ETF_COLORS:
+        return _ETF_COLORS[ticker]
+    defaults = _ETF_COLORS["_default"]
+    return defaults[idx % len(defaults)]
 
 
 def equity_chart(curves: dict[str, pd.Series], title: str = "") -> go.Figure:
@@ -32,7 +49,7 @@ def equity_chart(curves: dict[str, pd.Series], title: str = "") -> go.Figure:
             continue
         is_etf = name not in _STRATEGY_COLORS
         if is_etf:
-            color = _ETF_COLORS[etf_color_idx % len(_ETF_COLORS)]
+            color = _etf_color(name, etf_color_idx)
             etf_color_idx += 1
             line = dict(color=color, width=1.5, dash="dash")
         else:
@@ -57,7 +74,7 @@ def drawdown_chart(curves: dict[str, pd.Series]) -> go.Figure:
         dd = (series - roll_max) / (roll_max + 1e-9) * 100
         is_etf = name not in _STRATEGY_COLORS
         if is_etf:
-            color = _ETF_COLORS[etf_color_idx % len(_ETF_COLORS)]
+            color = _etf_color(name, etf_color_idx)
             etf_color_idx += 1
             line = dict(color=color, width=1, dash="dash")
             fill = None
