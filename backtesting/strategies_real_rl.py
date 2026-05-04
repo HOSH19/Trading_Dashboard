@@ -14,6 +14,45 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
+from dataclasses import dataclass
+from typing import Dict
+
+
+@dataclass
+class _Fold:
+    fold_idx: int
+    test_bars: Dict[str, pd.DataFrame]
+    test_start: pd.Timestamp
+    test_end: pd.Timestamp
+
+
+def _build_folds(
+    bars_by_symbol: dict,
+    train_window: int,
+    test_window: int,
+    step_size: int,
+) -> list[_Fold]:
+    """Replicate build_folds() from RL_Trader/data/dataset.py without importing it."""
+    idx = None
+    for df in bars_by_symbol.values():
+        idx = df.index if idx is None else idx.intersection(df.index)
+    common = idx.sort_values()
+    total = len(common)
+
+    folds, fold_idx, start = [], 0, 0
+    while start + train_window + test_window <= total:
+        train_end = start + train_window
+        test_end = min(train_end + test_window, total)
+        test_idx = common[train_end:test_end]
+        folds.append(_Fold(
+            fold_idx=fold_idx,
+            test_bars={sym: df.loc[test_idx] for sym, df in bars_by_symbol.items()},
+            test_start=test_idx[0],
+            test_end=test_idx[-1],
+        ))
+        fold_idx += 1
+        start += step_size
+    return folds
 
 VENDOR = Path(__file__).parents[1] / "vendors" / "rl_trader"
 REGIME_VENDOR = Path(__file__).parents[1] / "vendors" / "regime_trader"
@@ -165,9 +204,8 @@ def run_rl_trader(start: str, end: str, symbols=None) -> BacktestResult:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         from agents.a2c_agent import A2CAgent
-        from data.dataset import build_folds
 
-    folds = build_folds(
+    folds = _build_folds(
         ohlcv,
         train_window=train_window,
         test_window=train_cfg.get("test_window", 126),
