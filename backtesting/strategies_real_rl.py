@@ -37,7 +37,7 @@ def _ensure_vendor_path() -> None:
             del sys.modules[key]
 
 
-from backtesting.metrics import BacktestResult
+from backtesting.metrics import BacktestResult, TradeRecord
 from fetchers.market_data import load_ohlcv
 
 
@@ -119,7 +119,23 @@ def _simulate_oos(agent, test_bars: dict, config: dict, start_equity: float) -> 
             date = common_dates[env._start_idx + step - 1]
             equity_by_date[date] = info["equity"]
 
-    return pd.Series(equity_by_date).sort_index()
+    eq = pd.Series(equity_by_date).sort_index()
+
+    # Convert RL Trade objects (rebalance events) to dashboard TradeRecords
+    trades: list[TradeRecord] = []
+    for t in env._portfolio.trade_log:
+        side = "buy" if t.new_weight > t.old_weight else "sell"
+        qty = abs(t.turnover) / t.price if t.price > 0 else 0.0
+        trades.append(TradeRecord(
+            date=t.timestamp,
+            symbol=t.symbol,
+            side=side,
+            qty=qty,
+            price=t.price,
+            value=abs(t.turnover),
+        ))
+
+    return eq, trades
 
 
 def run_rl_trader(start: str, end: str, symbols=None) -> BacktestResult:
@@ -159,6 +175,7 @@ def run_rl_trader(start: str, end: str, symbols=None) -> BacktestResult:
     ckpt_dir = _checkpoint_dir()
     initial_capital = config.get("environment", {}).get("initial_capital", 100_000.0)
     all_equity: dict[pd.Timestamp, float] = {}
+    all_trades: list[TradeRecord] = []
     carry_equity = initial_capital
 
     for fold_idx in sorted(relevant):
@@ -179,12 +196,13 @@ def run_rl_trader(start: str, end: str, symbols=None) -> BacktestResult:
             agent = A2CAgent(config)
             agent.load(str(fold_ckpt))
 
-        oos_eq = _simulate_oos(agent, test_bars, config, carry_equity)
+        oos_eq, oos_trades = _simulate_oos(agent, test_bars, config, carry_equity)
 
         if not oos_eq.empty:
             carry_equity = float(oos_eq.iloc[-1])
             for date, val in oos_eq.items():
                 all_equity[date] = val
+            all_trades.extend(oos_trades)
 
     if not all_equity:
         return BacktestResult("RL Trader", pd.Series(dtype=float), [])
@@ -195,4 +213,5 @@ def run_rl_trader(start: str, end: str, symbols=None) -> BacktestResult:
         return BacktestResult("RL Trader", pd.Series(dtype=float), [])
 
     scale = 100_000.0 / eq_trimmed.iloc[0]
-    return BacktestResult("RL Trader", eq_trimmed * scale, [])
+    trades_trimmed = [t for t in all_trades if t.date >= start_ts]
+    return BacktestResult("RL Trader", eq_trimmed * scale, trades_trimmed)
