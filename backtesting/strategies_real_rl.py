@@ -145,6 +145,14 @@ def rl_date_range() -> tuple[pd.Timestamp, pd.Timestamp]:
     return result
 
 
+def _make_dummy_macro(index: pd.DatetimeIndex) -> pd.DataFrame:
+    """Zero-filled macro DataFrame so TradingEnv uses use_macro=True (425-dim obs)."""
+    return pd.DataFrame(
+        {"vix": 0.0, "yield_spread": 0.0, "credit_proxy": 0.0},
+        index=index,
+    )
+
+
 def _simulate_oos(agent, fold, config: dict, start_equity: float):
     """Run one OOS fold with a loaded agent (no gradient updates)."""
     _ensure_vendor_path()
@@ -157,7 +165,11 @@ def _simulate_oos(agent, fold, config: dict, start_equity: float):
     env_cfg["initial_capital"] = start_equity
     cfg["environment"] = env_cfg
 
-    env = TradingEnv(fold.test_bars, cfg, macro=None, noise_sigma=0.0, equity_jitter=0.0)
+    # Pass zero-filled macro so TradingEnv sets use_macro=True → 425-dim obs,
+    # matching the observation space the model was trained with.
+    first_sym = next(iter(fold.test_bars))
+    dummy_macro = _make_dummy_macro(fold.test_bars[first_sym].index)
+    env = TradingEnv(fold.test_bars, cfg, macro=dummy_macro, noise_sigma=0.0, equity_jitter=0.0)
     obs, _ = env.reset(seed=42)
 
     equity_by_date: dict[pd.Timestamp, float] = {}
