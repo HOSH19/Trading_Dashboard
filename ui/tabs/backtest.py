@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from backtesting.strategies import _ETF_OPTIONS
-from backtesting.agents.rl_trader import rl_date_range
+from backtesting.agents.rl.rl_trader import rl_date_range
 from ui.charts import drawdown_chart, equity_chart
 from ui.components import metrics_table, monthly_heatmaps_row
 from ui.tabs.backtest_runner import STRATEGY_EXPLAINER as _STRATEGY_EXPLAINER, run_selected, trade_summary

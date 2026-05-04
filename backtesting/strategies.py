@@ -5,8 +5,8 @@ from __future__ import annotations
 import pandas as pd
 
 from backtesting.agents.claudebot.claudebot import run_claudebot_api as run_claudebot
-from backtesting.agents.regime_trader import run_regime_trader
-from backtesting.agents.rl_trader import run_rl_trader
+from backtesting.agents.regime.regime_trader import run_regime_trader
+from backtesting.agents.rl.rl_trader import run_rl_trader
 from backtesting.backtest_result import BacktestResult
 from backtesting.engine import run_simulation
 from fetchers.market_data import load_ohlcv
