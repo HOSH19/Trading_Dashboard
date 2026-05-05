@@ -23,7 +23,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Algo Strategy Comparison")
+st.title("Algorithmic Trading Strategies Comparison")
 st.caption("RL Trader · Regime Trader · Claudebot")
 
 tab_live, tab_hist, tab_bt = st.tabs(["📡 Live Portfolio", "📊 Historical Performance", "🔬 Backtest Comparison"])
