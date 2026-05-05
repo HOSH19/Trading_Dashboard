@@ -21,12 +21,18 @@ def _load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def _slice_fold(ohlcv: dict, ts: pd.Timestamp, te: pd.Timestamp) -> dict:
-    return {
-        sym: sliced
+def _slice_fold(ohlcv: dict, ts: pd.Timestamp, te: pd.Timestamp, expected_symbols: list) -> dict:
+    """Slice ohlcv to the fold window; pad missing symbols with NaN so obs shape stays constant."""
+    sliced = {
+        sym: df.loc[(df.index >= ts) & (df.index <= te)]
         for sym, df in ohlcv.items()
-        if not (sliced := df.loc[(df.index >= ts) & (df.index <= te)]).empty
     }
+    ref_index = next((v.index for v in sliced.values() if not v.empty), pd.DatetimeIndex([]))
+    cols = ["open", "high", "low", "close", "volume"]
+    for sym in expected_symbols:
+        if sym not in sliced or sliced[sym].empty:
+            sliced[sym] = pd.DataFrame(float("nan"), index=ref_index, columns=cols)
+    return {sym: sliced[sym] for sym in expected_symbols}
 
 
 def _run_all_folds(
@@ -35,10 +41,11 @@ def _run_all_folds(
     """Iterate over relevant folds in order, chaining equity from one fold to the next."""
     all_equity: dict[pd.Timestamp, float] = {}
     all_trades: list[TradeRecord] = []
+    expected_symbols = config.get("data", {}).get("symbols", list(ohlcv.keys()))
     carry = initial_capital
     for fold_idx in sorted(relevant):
         ts, te = relevant[fold_idx]
-        test_bars = _slice_fold(ohlcv, ts, te)
+        test_bars = _slice_fold(ohlcv, ts, te, expected_symbols)
         if not test_bars:
             continue
         agent = load_agent(ckpt_dir / f"fold_{fold_idx}" / "best_model.zip", config)
@@ -48,7 +55,6 @@ def _run_all_folds(
             all_equity.update(eq.to_dict())
             all_trades.extend(trades)
     return all_equity, all_trades
-
 
 
 
