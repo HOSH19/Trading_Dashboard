@@ -80,7 +80,7 @@ def _run_backtest_button(start_date, end_date, run_rl, run_regime, etf_benchmark
 def render() -> None:
     st.subheader("Historical Strategy Backtest")
     st.markdown("Runs inference on 3 live agents against the **same** historical period using their "
-                "**Github Actionsproduction code** ")
+                "**Github Actionsproduction code**. Claudebot is excluded due to API costs.")
     with st.expander("How each agent works", expanded=False):
         st.markdown(_STRATEGY_EXPLAINER)
     rl_min, rl_max = rl_date_range()
