@@ -38,10 +38,8 @@ def _max_consec_losses(seq: list[int]) -> int:
     return max_run
 
 
-def trade_stats(trade_log: list[TradeRecord], initial_capital: float) -> dict:
-    """Compute win rate, profit factor, expectancy, and related stats from a trade log."""
+def _accumulate(trade_log: list[TradeRecord]) -> tuple:
     win_rets, loss_rets, hold_days, win_vals, loss_vals, seq = [], [], [], [], [], []
-
     for ep, xp, ed, xd, ev in matched_trades(trade_log):
         ret = xp / ep - 1
         hold_days.append((xd - ed).days)
@@ -49,11 +47,15 @@ def trade_stats(trade_log: list[TradeRecord], initial_capital: float) -> dict:
             win_rets.append(ret); win_vals.append(ev * ret); seq.append(1)
         else:
             loss_rets.append(ret); loss_vals.append(ev * abs(ret)); seq.append(0)
+    return win_rets, loss_rets, hold_days, win_vals, loss_vals, seq
 
+
+def trade_stats(trade_log: list[TradeRecord], initial_capital: float) -> dict:
+    """Compute win rate, profit factor, expectancy, and related stats from a trade log."""
+    win_rets, loss_rets, hold_days, win_vals, loss_vals, seq = _accumulate(trade_log)
     if not seq:
         return {k: None for k in ("win_rate", "profit_factor", "avg_win", "avg_loss",
                                    "expectancy", "best", "worst", "avg_hold", "max_consec_losses")}
-
     wr = len(win_rets) / len(seq)
     avg_win  = float(np.mean(win_rets))  if win_rets  else 0.0
     avg_loss = float(np.mean(loss_rets)) if loss_rets else 0.0

@@ -10,6 +10,28 @@ import pandas as pd
 from backtesting.trade_record import TradeRecord
 from backtesting.trade_stats import fmt_f2, fmt_int, fmt_pct, trade_stats
 
+_DAILY_RF = 0.045 / 252
+
+
+def _return_stats(eq: pd.Series) -> tuple[float, float]:
+    n_years = len(eq) / 252
+    cagr = (eq.iloc[-1] / eq.iloc[0]) ** (1 / max(n_years, 1e-6)) - 1
+    return eq.iloc[-1] / eq.iloc[0] - 1, cagr
+
+
+def _risk_stats(rets: pd.Series) -> tuple[float, float, float]:
+    excess = rets - _DAILY_RF
+    ann_vol = rets.std() * np.sqrt(252)
+    sharpe = float(excess.mean() / excess.std() * np.sqrt(252)) if excess.std() > 0 else 0.0
+    downside_std = excess[excess < 0].std()
+    sortino = float(excess.mean() / downside_std * np.sqrt(252)) if downside_std > 0 else 0.0
+    return sharpe, sortino, ann_vol
+
+
+def _max_drawdown(eq: pd.Series) -> float:
+    roll_max = eq.cummax()
+    return float(((eq - roll_max) / (roll_max + 1e-9)).min())
+
 
 @dataclass
 class BacktestResult:
@@ -39,24 +61,12 @@ class BacktestResult:
         eq = self.equity_curve.dropna()
         if len(eq) < 2:
             return {}
-
         rets = eq.pct_change().dropna()
-        total_return = eq.iloc[-1] / eq.iloc[0] - 1
-        n_years = len(eq) / 252
-        cagr = (eq.iloc[-1] / eq.iloc[0]) ** (1 / max(n_years, 1e-6)) - 1
-
-        daily_rf = 0.045 / 252  # 4.5% annualised, matching regime-trader's performance.py
-        excess = rets - daily_rf
-        ann_vol = rets.std() * np.sqrt(252)
-        sharpe = float(excess.mean() / excess.std() * np.sqrt(252)) if excess.std() > 0 else 0.0
-        downside_std = excess[excess < 0].std()
-        sortino = float(excess.mean() / downside_std * np.sqrt(252)) if downside_std > 0 else 0.0
-
-        roll_max = eq.cummax()
-        max_dd = ((eq - roll_max) / (roll_max + 1e-9)).min()
+        total_return, cagr = _return_stats(eq)
+        sharpe, sortino, ann_vol = _risk_stats(rets)
+        max_dd = _max_drawdown(eq)
         ts = trade_stats(self.trade_log, self.initial_capital)
         sells = sum(1 for t in self.trade_log if t.side == "sell")
-
         return {
             "Total Return":       f"{total_return:.1%}",
             "CAGR":               f"{cagr:.1%}",
