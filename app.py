@@ -24,7 +24,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("Algo Strategy Comparison")
-st.caption("RL Trader · Regime Trader · Claudebot — separate Alpaca paper accounts")
+st.caption("RL Trader · Regime Trader · Claudebot")
 
 tab_live, tab_hist, tab_bt = st.tabs(["📡 Live Portfolio", "📊 Historical Performance", "🔬 Backtest Comparison"])
 
