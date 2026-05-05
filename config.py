@@ -58,7 +58,7 @@ STRATEGIES: list[StrategyConfig] = [
         env_prefix="RL",
         db_path=BASE / "../RL_Trader/state.db",
         trade_log_path=None,
-        description="Deep RL (PPO) — momentum-weighted multi-asset allocation, weekly rebalance",
+        description="Deep RL (A2C) — momentum-weighted multi-asset allocation, weekly rebalance",
     ),
     StrategyConfig(
         name="Regime Trader",
