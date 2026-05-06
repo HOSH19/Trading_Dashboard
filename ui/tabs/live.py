@@ -64,6 +64,7 @@ def _positions_row(snapshots) -> None:
 def render() -> None:
     if st.button("Refresh live data", key="refresh_live"):
         st.cache_data.clear()
+        st.rerun()
 
     with st.spinner("Fetching live portfolio data…"):
         snapshots = _load_snapshots()

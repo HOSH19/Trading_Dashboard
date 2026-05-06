@@ -33,6 +33,7 @@ def render() -> None:
     period_label = st.radio("Period", list(_PERIOD_MAP.keys()), index=4, horizontal=True, key="hist_period")
     if st.button("Refresh", key="refresh_hist"):
         st.cache_data.clear()
+        st.rerun()
 
     with st.spinner("Fetching account history from Alpaca…"):
         curves = _deserialise(_load_history(_PERIOD_MAP[period_label]))
