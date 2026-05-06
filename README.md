@@ -2,7 +2,6 @@
 
 A Streamlit dashboard comparing three algorithmic trading strategies running on separate Alpaca paper accounts.
 
-## Agents
 
 ---
 
@@ -20,6 +19,7 @@ A Streamlit dashboard comparing three algorithmic trading strategies running on 
 | **Transparency** | SQLite state DB | Git Markdown memory files | SQLite equity + trade log |
 
 ---
+## Agents
 
 ### [Regime Trader](https://github.com/HOSH19/Regime_Trader.git)
 
