@@ -4,13 +4,30 @@ A Streamlit dashboard comparing three algorithmic trading strategies running on 
 
 ## Agents
 
+---
+
+## Comparison
+
+| | Regime Trader | Claude Trader | RL Trader |
+|---|---|---|---|
+| **Core model** | HMM regime classification | Claude LLM + rule scoring | PPO / A2C / SAC |
+| **Signal** | Forward HMM inference + technical filter | Web research + 5-factor score (≥7 to enter) | Learned policy weights |
+| **Execution** | Live loop / daily cron | Scheduled ephemeral VMs | Daily cron (offline training) |
+| **Trailing stop** | ATR × 1.5–3.0 (regime-dependent) | 10% GTC; tightens at +15% / +20% | Learned via reward; hard caps enforced |
+| **Max position** | 8% | 8% | 8% |
+| **Max exposure** | 80% | 80% | 80% |
+| **Data** | OHLCV + macro (VIX, yield, credit) | OHLCV + Tavily web research | OHLCV + macro (same as Regime) |
+| **Transparency** | SQLite state DB | Git Markdown memory files | SQLite equity + trade log |
+
+---
+
 ### [Regime Trader](https://github.com/HOSH19/Regime_Trader.git)
 
 Fully systematic long-only trader driven by a Hidden Markov Model that classifies latent market regimes.
 
 **How it works:**
 - Trains an HMM (3–7 states, BIC-selected, Student-t emissions) on price + macro features (VIX, yield spread, credit stress)
-- Forward algorithm only — no lookahead; a stability filter requires a new regime to persist ≥3 bars before acting
+- Forward algorithm only. No lookahead; a stability filter requires a new regime to persist ≥3 bars before acting
 - Regime states are ranked by historical return (BEAR → NEUTRAL → BULL) and each maps to one of three strategy tiers (low / mid / high volatility)
 - Within each tier, a technical filter (RSI momentum or Bollinger mean-reversion) gates individual entries
 - Sizing via half-Kelly with correlation-aware position capping
@@ -52,21 +69,6 @@ Multi-asset portfolio allocator trained via reinforcement learning (PPO / A2C / 
 
 ---
 
-## Comparison
-
-| | Regime Trader | Claude Trader | RL Trader |
-|---|---|---|---|
-| **Core model** | HMM regime classification | Claude LLM + rule scoring | PPO / A2C / SAC |
-| **Signal** | Forward HMM inference + technical filter | Web research + 5-factor score (≥7 to enter) | Learned policy weights |
-| **Execution** | Live loop / daily cron | Scheduled ephemeral VMs | Daily cron (offline training) |
-| **Trailing stop** | ATR × 1.5–3.0 (regime-dependent) | 10% GTC; tightens at +15% / +20% | Learned via reward; hard caps enforced |
-| **Max position** | 8% | 8% | 8% |
-| **Max exposure** | 80% | 80% | 80% |
-| **Data** | OHLCV + macro (VIX, yield, credit) | OHLCV + Tavily web research | OHLCV + macro (same as Regime) |
-| **Transparency** | SQLite state DB | Git Markdown memory files | SQLite equity + trade log |
-
----
-
 ## Dashboard tabs
 
 - **Live Portfolio** — real-time equity, positions, and P&L from each Alpaca account
@@ -83,4 +85,4 @@ streamlit run app.py
 
 ## Deployment
 
-Deployed on [Streamlit Community Cloud](https://share.streamlit.io). Secrets are configured under **App settings → Secrets**.
+Deployed on [Streamlit Community Cloud](https://share.streamlit.io).
